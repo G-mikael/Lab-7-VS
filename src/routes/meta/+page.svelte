@@ -10,6 +10,8 @@ let xAxis, yAxis;
 let yAxisGridlines;
 let hoveredIndex = -1;
 let cursor = {x: 0, y: 0};
+let clickedCommits = [];
+let commitTooltip;
 
 $: hoveredCommit = commits[hoveredIndex] ?? hoveredCommit ?? {};
 
@@ -21,6 +23,34 @@ let usableArea = {
 };
 usableArea.width = usableArea.right - usableArea.left;
 usableArea.height = usableArea.bottom - usableArea.top;
+
+async function dotInteraction (index, evt) {
+    let hoveredDot = evt.target;
+    if (evt.type === "mouseenter") {
+        hoveredIndex = index;
+        cursor = {x: evt.x, y: evt.y};
+        tooltipPosition = await computePosition(hoveredDot, commitTooltip, {
+            strategy: "fixed", // because we use position: fixed
+            middleware: [
+                offset(5), // spacing from tooltip to dot
+                autoPlacement() // see https://floating-ui.com/docs/autoplacement
+            ],
+        });        }
+    else if (evt.type === "mouseleave") {
+        hoveredIndex = -1
+    }
+	else if (evt.type === "click") {
+    let commit = commits[index]
+    if (!clickedCommits.includes(commit)) {
+        // Add the commit to the clickedCommits array
+        clickedCommits = [...clickedCommits, commit];
+    }
+    else {
+            // Remove the commit from the array
+            clickedCommits = clickedCommits.filter(c => c !== commit);
+    }
+}
+}
 
 onMount(async () => {
 	data = await d3.csv("/loc.csv", row => ({
@@ -54,6 +84,7 @@ onMount(async () => {
 
     	return ret;
 	});
+	commits = d3.sort(commits, d => -d.totalLines);
 });
 
 $: minDate = d3.min(commits.map(d => d.date));
@@ -69,6 +100,11 @@ $: xScale = d3.scaleTime()
 $: yScale = d3.scaleLinear()
               .domain([24, 0])
               .range([usableArea.bottom, usableArea.top]);
+
+$: rScale = d3.scaleSqrt()
+                .domain(d3.extent(commits.map(d=>d.totalLines)))
+                .range([2, 30]);
+
 
 
 $: {
@@ -92,6 +128,7 @@ $: {
 <p>This page includes stats about the code of this website</p>
 <p>Total lines of code: {data.length}</p>
 
+<div bind:this={commitTooltip} class="tooltip">...</div>
 <dl class="info tooltip" hidden={hoveredIndex === -1} style="top: {cursor.y}px; left: {cursor.x}px">
     <dt>Commit</dt>
     <dd><a href="{ hoveredCommit.url }" target="_blank">{ hoveredCommit.id }</a></dd>
@@ -112,17 +149,17 @@ $: {
 	<g class="gridlines" transform="translate({usableArea.left}, 0)" bind:this={yAxisGridlines} />
     <g class="dots">
 		{#each commits as commit, index }
-			<circle
-				on:mouseenter={evt => {
-					hoveredIndex = index;
-					cursor = {x: evt.x, y: evt.y};
-				}}
-				on:mouseleave={evt => hoveredIndex = -1}
-				cx={ xScale(commit.datetime) }
-				cy={ yScale(commit.hourFrac) }
-				r="5"
-				fill="steelblue"
-			/>
+		<circle
+		on:mouseenter={evt => dotInteraction(index, evt)}
+		on:mouseleave={evt => dotInteraction(index, evt)}
+		on:click={ evt => dotInteraction(index, evt) }
+		class:selected={ clickedCommits.includes(commit) }
+		cx={ xScale(commit.datetime) }
+		cy={ yScale(commit.hourFrac) }
+		r={ rScale(commit.totalLines) }
+		fill="steelblue"
+		fill-opacity="0.5"
+	/>
 		{/each}
 	</g>
 </svg>
